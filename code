@@ -1,1 +1,132 @@
+import pandas as pd
+import numpy as np
+import nltk, string
+train_data_part1 = pd.read_csv('train_essays.csv') #Human generated essays
+train_data_part2 = pd.read_csv('llm2.csv') ## Chatgpt generated essays
+
+train_data_part3 = pd.DataFrame({'text': list(train_data_part1['text']), 'label': list(train_data_part1['generated'])})
+train_data_part3.head()
+
+train_data = pd.concat([train_data_part3, train_data_part2[['text', 'label']]], axis=0)
+train_data = train_data.sample(frac=1).reset_index(drop=True)
+
+fraction = 0.7
+
+train_split = int(len(train_data)*fraction)
+print(train_split)
+train_set = train_data[0:train_split]
+test_set= train_data[train_split:]
+
+class NaiveBayesClassifier:
+    def __init__(self):
+        self.class_prob = {}
+        self.word_class = {}
+        self.word_class[0] = {}
+        self.word_class[1] = {}
+        self.vocab = set()
+        #self.alpha = alpha
+        self.all_words = {}
+        self.all_words[0] = 0
+        self.all_words[1] = 0
+        self.stopwords = ['i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', "you're", "you've", "you'll", "you'd", 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', "she's", 'her', 'hers', 'herself', 'it', "it's", 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'this', 'that', "that'll", 'these','those','am','is','are','was','were','be','been','being','have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'a','an', 'the', 'and', 'but', 'if', 'or','because', 'as', 'until', 'while', 'of', 'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'to','from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again', 'further','then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', "don't", 'should', "should've", 'now', 'd', 'll', 'm', 'o', 're', 've', 'y', 'ain', 'aren', "aren't", 'couldn', "couldn't", 'didn', "didn't", 'doesn', "doesn't", 'hadn', "hadn't", 'hasn', "hasn't", 'haven', "haven't", 'isn', "isn't", 'ma', 'mightn', "mightn't", 'mustn', "mustn't", 'needn', "needn't", 'shan', "shan't", 'shouldn', "shouldn't", 'wasn', "wasn't", 'weren', "weren't", 'won', "won't", 'wouldn', "wouldn't"]
+    #defining prior probabilities       
+    def prior_probability(self, train_set):
+        class_count = {}
+        class_count[0] = 0
+        class_count[1] = 1
+        for item in list(train_set['label']):
+            if item == 0:
+                class_count[0] += 1
+            else:
+                class_count[1] += 1
+        class_prob = {}
+        self.class_prob[0] = class_count[0]/len(train_set)
+        self.class_prob[1] = class_count[1]/len(train_set)
+    #counting the occurance of each word for each class
+    def create_train_knowledge(self, train_set):
+        for i in range(len(train_set)):
+            for words in train_set['text'][i].split():
+                if words not in self.stopwords:
+                    self.vocab.add(words)
+                    label_i = list(train_set['label'])[i]
+                    self.all_words[label_i] += 1
+                    if words in self.word_class[label_i]:
+                        self.word_class[label_i][words] += 1
+                    else:
+                        self.word_class[label_i][words] = 1
+                
+  #calculating logistic probabilities
+    def calculate_log_prob(self, cls, sent, alpha):
+        product = 1
+        for word in sent.split():
+            if word in self.vocab and word in self.word_class[cls]: 
+                product *= self.word_class[cls][word]*((self.word_class[cls][word]+alpha)/(self.all_words[cls]+alpha*len(self.vocab)))
+        return product * self.class_prob[cls]    
+    
+    def predict(self, sent, alpha):
+        class_0 = self.calculate_log_prob(0, sent, alpha)
+        class_1 = self.calculate_log_prob(1, sent, alpha)
+        if class_1 >= class_0:
+            return 1
+        else:
+            return 0
+        
+    def get_score(self, test_set, alpha):
+        pred = []
+        for item in list(test_set['text']):
+            pred.append(self.predict(item, alpha))
+        count = 0
+        for ytrue, ypred in zip(list(test_set['label']), pred):
+            count += int(ytrue == ypred)
+        return count/len(list(test_set['label']))
+
+        nb = NaiveBayesClassifier()
+nb.prior_probability(train_set)
+print(nb.class_prob)
+nb.create_train_knowledge(train_set)
+
+alpha_value = 10  # You can adjust the value of alpha as needed
+
+result_class_0 = nb.calculate_log_prob(0, 'cars are not essential items', alpha_value)
+result_class_1 = nb.calculate_log_prob(1, 'cars are not essential items', alpha_value)
+
+print((result_class_0,result_class_1))
+
+alpha = 10
+nb.get_score(test_set, alpha)
+
+alpha = [1000000, 500000, 50000, 5000, 500, 50, 5, 1, 0.1, 0.01, 0.001, 0.0001]
+accuracy = []
+for item in alpha:
+    accuracy.append(nb.get_score(test_set, item))
+accuracy
+import matplotlib.pyplot as plt
+import numpy as np
+
+plt.plot(np.log(alpha), accuracy)
+plt.xlabel('log(alpha)')
+plt.ylabel('accuracy') 
+plt.title('Effect of smoothing on naive bayes classifier')
+plt.legend() 
+plt.show()
+alpha_i = 0.01
+nb.get_score(test_set, item)
+
+#llm generated essays
+i = 0
+value_based_sorted = sorted(nb.word_class[1], key=nb.word_class[1].get, reverse=True)
+for item in value_based_sorted:
+    print(item, nb.word_class[1][item])
+    i += 1
+    if i == 10:
+        break
+
+#human generated essays
+i = 0
+value_based_sorted = sorted(nb.word_class[0], key=nb.word_class[0].get, reverse=True)
+for item in value_based_sorted:
+    print(item, nb.word_class[0][item])
+    i += 1
+    if i == 10:
+        break
 
